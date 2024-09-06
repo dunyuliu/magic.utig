@@ -615,7 +615,75 @@ contains
          ogrun(:)=one/GrunNb
 
          l_non_adia = .true.
-
+   else if ( index(interior_model,'BMOCORE') /= 0 ) then
+            DissNb =0.3929_cp ! Di = \alpha_O g d / c_p
+            ThExpNb=0.0566_cp ! Co = \alpha_O T_O
+            GrunNb =1.5_cp ! Gruneisen paramater
+            hcomp  =2.2_cp*r_cmb
+   
+            alpha0=(one+0.6_cp*r**2/hcomp**2)/(one+0.6_cp/2.2_cp**2)
+            rgrav =(r-0.6_cp*r**3/hcomp**2)/(r_cmb*(one-0.6_cp/2.2_cp**2))
+   
+            !dentropy0 = -half*(ampStrat+one)*(one-tanh(slopeStrat*(r-rStrat)))+ &
+            !            & ampStrat
+   
+            !! d ln(temp0) / dr
+            !dtemp0=epsS*dentropy0-DissNb*alpha0*rgrav
+   
+            !call getBackground(dtemp0,0.0_cp,temp0)
+            !temp0=exp(temp0) ! this was ln(T_0)
+            !dtemp0=dtemp0*temp0
+   
+            !drho0=-ThExpNb*epsS*alpha0*temp0*dentropy0-DissNb/GrunNb*alpha0*rgrav
+            !call getBackground(drho0,0.0_cp,rho0)
+            !rho0=exp(rho0) ! this was ln(rho_0)
+            !beta=drho0
+   
+            hcond = (one-0.4469_cp*(r/r_cmb)**2)/(one-0.4469_cp)
+            hcond = hcond/hcond(1)
+            temp0 = (one+GrunNb*(r_icb**2-r**2)/hcomp**2)
+            temp0 = temp0/temp0(1)
+            dtemp0cond=-cmbHflux/(r**2*hcond)
+   
+            do k=1,10 ! 10 iterations is enough to converge
+               dtemp0ad=-DissNb*alpha0*rgrav*temp0-epsS*temp0(n_r_max)
+               n_const=minloc(abs(dtemp0ad-dtemp0cond))
+               rStrat=r(n_const(1))
+               func=half*(tanh(slopeStrat*(r-rStrat))+one)
+   
+               if ( rStrat<r_cmb ) then
+                  dtemp0=func*dtemp0cond+(one-func)*dtemp0ad
+               else
+                  dtemp0=dtemp0ad
+               end if
+   
+               call getBackground(dtemp0,one,temp0)
+            end do
+   
+            dentropy0=dtemp0/temp0/epsS+DissNb*alpha0*rgrav/epsS
+            !drho0=-ThExpNb*epsS*alpha0*temp0*dentropy0-DissNb*alpha0*rgrav/GrunNb
+            drho0=-DissNb*alpha0*rgrav/GrunNb
+            call getBackground(drho0,0.0_cp,rho0)
+            rho0=exp(rho0) ! this was ln(rho_0)
+            beta=drho0
+   
+            ! The final stuff is always required
+            call get_dr(beta,dbeta,n_r_max,rscheme_oc)
+            call get_dr(dbeta,ddbeta,n_r_max,rscheme_oc)
+            call get_dr(dtemp0,d2temp0,n_r_max,rscheme_oc)
+            call get_dr(alpha0,dLalpha0,n_r_max,rscheme_oc)
+            dLalpha0=dLalpha0/alpha0 ! d log (alpha) / dr
+            call get_dr(dLalpha0,ddLalpha0,n_r_max,rscheme_oc)
+            dLtemp0 = dtemp0/temp0
+            call get_dr(dLtemp0,ddLtemp0,n_r_max,rscheme_oc)
+   
+            ! N.B. rgrav is not gravity but alpha * grav
+            rgrav = alpha0*rgrav
+   
+            !-- ogrun
+            ogrun(:)=one/GrunNb
+   
+            l_non_adia = .true.
       else if (index(interior_model,'MESA_5M_ZAMS') /= 0) then
 
          l_non_adia = .true.
