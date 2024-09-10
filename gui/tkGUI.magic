@@ -1,0 +1,176 @@
+#! /usr/bin/env python3
+import tkinter as tk
+from tkinter import ttk, filedialog
+import subprocess
+import os, signal, sys
+import numpy as np
+import matplotlib
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg as FigureCanvas
+from magic import *
+matplotlib.use('TkAgg')
+
+class MyWindow(tk.Tk):
+    def __init__(self):
+        super().__init__()
+        
+        print('Welcome to MagIC viewer!')
+        
+        self.title("MagIC Viewer")
+        self.geometry("1000x600")
+        style = ttk.Style()
+        style.theme_use('clam')
+        pixalMargin = 5
+        stickyOption = "nesw"
+        nUnits4Grids = 10
+        for i in range(nUnits4Grids):
+            self.grid_columnconfigure(i, weight=1)
+            self.grid_rowconfigure(i, weight=1)
+        buttonWidth = 10 # characters
+        
+        self.protocol("WM_DELETE_WINDOW", self.on_closing)
+        
+        magicTkGuiPathLabel = ttk.Label(self, text="Set MagIC tkGUI path")
+        magicTkGuiPathLabel.grid(row=0, column=0, rowspan=1, columnspan=1, padx=pixalMargin, pady=pixalMargin, sticky=stickyOption)
+        self.guiPathChooser = ttk.Entry(self)
+        self.guiPathChooser.grid(row=0, column=1, rowspan=1, columnspan=1, padx=pixalMargin, pady=pixalMargin, sticky=stickyOption)
+        try:
+            exePaths = os.environ.get('PATH', '').split(os.pathsep)
+            for path in exePaths:
+                plambdaFullPath = os.path.join(path, 'tkGUI.magic')
+                if os.path.isfile(plambdaFullPath):
+                    self.plambdaPath = path
+        except Exception as e:
+            self.plambdaPath = 'No tkGUI.magic is found in $PATH; please exit and assign.'
+        self.guiPathChooser.insert(0, self.plambdaPath)
+
+        self.dataRootPath = tk.StringVar()
+        self.dataRootPath.set('Not set yet')
+        
+        self.currentPath = tk.StringVar()
+        self.currentPath.set(os.getcwd())
+        
+        setDataPathLabel = ttk.Label(self, text="Set path to model results")
+        setDataPathLabel.grid(row=1, column=0, rowspan=1, columnspan=1, padx=pixalMargin, pady=pixalMargin, sticky=stickyOption)
+
+        self.navigateButton = tk.Menubutton(self, textvariable=self.dataRootPath, relief=tk.RAISED, width=buttonWidth, anchor="e")
+        self.navigateButton.grid(row=1, column=1, rowspan=1, columnspan=1, padx=pixalMargin, pady=pixalMargin, sticky=stickyOption)
+
+        self.navigateButton.menu = tk.Menu(self.navigateButton, tearoff=0)
+        self.navigateButton["menu"] = self.navigateButton.menu
+        self.updateDropdownMenu()
+       
+        plotEkinButton = ttk.Button(self, text="Plot e_kin ts", command=lambda:self.plotData('e_kin_ts'))
+        plotEkinButton.grid(row=2, column=0, rowspan=1, columnspan=1, padx=pixalMargin, pady=pixalMargin, sticky=stickyOption)
+        
+        plotEmagButton = ttk.Button(self, text="Plot e_mag_oc ts", command=lambda:self.plotData('e_mag_oc_ts'))
+        plotEmagButton.grid(row=2, column=1, rowspan=1, columnspan=1, padx=pixalMargin, pady=pixalMargin, sticky=stickyOption)
+        
+        plotDipoleButton = ttk.Button(self, text="Plot dipole ts", command=lambda:self.plotData('dipole_ts'))
+        plotDipoleButton.grid(row=3, column=0, rowspan=1, columnspan=1, padx=pixalMargin, pady=pixalMargin, sticky=stickyOption)
+        
+        plotMagSpecButton = ttk.Button(self, text="Plot mag spec", command=lambda:self.plotData('mag_spec'))
+        plotMagSpecButton.grid(row=3, column=1, rowspan=1, columnspan=1, padx=pixalMargin, pady=pixalMargin, sticky=stickyOption)
+        
+        plotEquatVelButton = ttk.Button(self, text="Plot equat vel", command=lambda:self.plotData('equat_vel'))
+        plotEquatVelButton.grid(row=4, column=0, rowspan=1, columnspan=1, padx=pixalMargin, pady=pixalMargin, sticky=stickyOption)
+        
+        plotAziAvgButton = ttk.Button(self, text="Plot azi avg", command=lambda:self.plotData('azi_avg'))
+        plotAziAvgButton.grid(row=4, column=1, rowspan=1, columnspan=1, padx=pixalMargin, pady=pixalMargin, sticky=stickyOption)
+        
+        plotBrButton = ttk.Button(self, text="Plot br r=1", command=lambda:self.plotData('br'))
+        plotBrButton.grid(row=5, column=0, rowspan=1, columnspan=1, padx=pixalMargin, pady=pixalMargin, sticky=stickyOption)
+        
+        self.figureCanvas = tk.Frame(self)
+        self.figureCanvas.grid(row=0, column=3, rowspan=10, columnspan=7, padx=pixalMargin, pady=pixalMargin, sticky=stickyOption)
+        self.figureCanvas.grid_propagate(False)
+        # Insert an empty figure
+        fig = plt.figure()
+        fig.set_size_inches(5.5,4)
+        canvas = FigureCanvas(fig, master=self.figureCanvas)
+        canvas.draw()
+        canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=1)
+    
+    def getDirectoryContents(self, path):
+        try:
+            #contents = os.listdir(path)
+            contents = [item for item in os.listdir(path) if os.path.isdir(os.path.join(path,item))]
+            contents.insert(0, '..')
+            return contents
+        except FileNotFoundError:
+            return []
+
+    def updateDataPath(self):
+        self.dataRootPath.set(self.currentPath.get())
+    
+    def updateDropdownMenu(self):
+        self.navigateButton.menu.delete(0,'end')
+        currentDir = self.currentPath.get()
+        for item in self.getDirectoryContents(currentDir):
+            self.navigateButton.menu.add_command(
+                label=item,
+                command = lambda item=item:self.changeDirectory(item)
+            )
+
+    def changeDirectory(self, item):
+        if item == "..":
+            new_path = os.path.dirname(self.currentPath.get())
+        else:
+            new_path = os.path.join(self.currentPath.get(), item)
+
+        if os.path.isdir(new_path):
+            self.currentPath.set(new_path)
+            self.updateDropdownMenu()
+            if item != "..":
+                self.dataRootPath.set(new_path)
+        os.chdir(new_path)
+        print('Navigating to ', new_path)
+
+    def on_closing(self):
+        self.quit()
+        self.destroy()
+        sys.exit()
+        
+    def plotData(self, plot_type):
+        if plot_type=="e_kin_ts":
+            h = MagicTs(field="e_kin")
+        elif plot_type=="e_mag_oc_ts":
+            h = MagicTs(field="e_mag_oc")
+        elif plot_type=="dipole_ts":
+            h = MagicTs(field="dipole")
+        elif plot_type=="mag_spec":
+            h = MagicSpectrum(field="emag")
+        elif plot_type=="equat_vel":
+            S = Surf()
+            h = S.equat(field="vr", cm="RdBu_r")
+        elif plot_type=="azi_avg":
+            S = Surf()
+            h = S.avg(field="vphi", mer=True, cm="RdBu_r")
+        elif plot_type=="br":
+            S = Surf()
+            h = S.surf(field="br",r=1.0,cm="PRGn_r")
+
+        #plt.savefig(plot_type+'.png')
+        fig = plt.gcf()
+        fig.set_size_inches(5.5, 4)
+        # Clear the existing content of figureCanvas
+        for widget in self.figureCanvas.winfo_children():
+            widget.destroy()
+
+        # Add the new plot to the figureCanvas
+        canvas = FigureCanvas(fig, master=self.figureCanvas)
+        canvas.draw()
+        canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=1)
+
+def signal_handler(sig, frame):
+    print('Exiting. You pressed Ctrl+C!')
+    sys.exit(0)
+    
+if __name__ == "__main__":
+    #signal.signal(signal.SIGINT, signal_handler)
+    try:
+        app = MyWindow()
+        app.mainloop()
+    except KeyboardInterrupt:
+        print("Application closed by user")
+        sys.exit(0)
