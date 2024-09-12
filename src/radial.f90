@@ -616,7 +616,7 @@ contains
 
          l_non_adia = .true.
       else if ( index(interior_model,'BMOCORE') /= 0 ) then
-         print('Using the newly created interior_model BMOCORE as NONE')
+         write(*,*) 'Using the newly created interior_model BMOCORE as NONE'
          ! g(r) = g0 + g1*r/ro + g2*(ro/r)**2
          ! Default values: g0=0, g1=1, g2=0
          ! An easy way to change gravity
