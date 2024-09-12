@@ -615,75 +615,111 @@ contains
          ogrun(:)=one/GrunNb
 
          l_non_adia = .true.
-   else if ( index(interior_model,'BMOCORE') /= 0 ) then
-            DissNb =0.3929_cp ! Di = \alpha_O g d / c_p
-            ThExpNb=0.0566_cp ! Co = \alpha_O T_O
-            GrunNb =1.5_cp ! Gruneisen paramater
-            hcomp  =2.2_cp*r_cmb
-   
-            alpha0=(one+0.6_cp*r**2/hcomp**2)/(one+0.6_cp/2.2_cp**2)
-            rgrav =(r-0.6_cp*r**3/hcomp**2)/(r_cmb*(one-0.6_cp/2.2_cp**2))
-   
-            !dentropy0 = -half*(ampStrat+one)*(one-tanh(slopeStrat*(r-rStrat)))+ &
-            !            & ampStrat
-   
-            !! d ln(temp0) / dr
-            !dtemp0=epsS*dentropy0-DissNb*alpha0*rgrav
-   
-            !call getBackground(dtemp0,0.0_cp,temp0)
-            !temp0=exp(temp0) ! this was ln(T_0)
-            !dtemp0=dtemp0*temp0
-   
-            !drho0=-ThExpNb*epsS*alpha0*temp0*dentropy0-DissNb/GrunNb*alpha0*rgrav
-            !call getBackground(drho0,0.0_cp,rho0)
-            !rho0=exp(rho0) ! this was ln(rho_0)
-            !beta=drho0
-   
-            hcond = (one-0.4469_cp*(r/r_cmb)**2)/(one-0.4469_cp)
-            hcond = hcond/hcond(1)
-            temp0 = (one+GrunNb*(r_icb**2-r**2)/hcomp**2)
-            temp0 = temp0/temp0(1)
-            dtemp0cond=-cmbHflux/(r**2*hcond)
-   
-            do k=1,10 ! 10 iterations is enough to converge
-               dtemp0ad=-DissNb*alpha0*rgrav*temp0-epsS*temp0(n_r_max)
-               n_const=minloc(abs(dtemp0ad-dtemp0cond))
-               rStrat=r(n_const(1))
-               func=half*(tanh(slopeStrat*(r-rStrat))+one)
-   
-               if ( rStrat<r_cmb ) then
-                  dtemp0=func*dtemp0cond+(one-func)*dtemp0ad
+      else if ( index(interior_model,'BMOCORE') /= 0 ) then
+         print('Using the newly created interior_model BMOCORE as NONE')
+         ! g(r) = g0 + g1*r/ro + g2*(ro/r)**2
+         ! Default values: g0=0, g1=1, g2=0
+         ! An easy way to change gravity
+         rgrav(:)=g0+g1*r(:)/r_cmb+g2*r_cmb**2*or2(:)
+
+         if ( l_anel ) then
+
+            if ( l_non_adia ) then
+
+               dtemp0(:)=-DissNb*rgrav(:)
+               !-- Use d2temp0 as a work array
+               d2temp0(:)=-epsS*dentropy0(:)
+               call getBackground(dtemp0,1.0_cp,temp0,d2temp0)
+               dtemp0(:)=epsS*temp0(:)*dentropy0(:)-DissNb*rgrav(:)
+
+               drho0=-ThExpNb*epsS*dentropy0-DissNb/GrunNb*rgrav/temp0
+               call getBackground(drho0,0.0_cp,rho0)
+               rho0=exp(rho0) ! this was ln(rho_0)
+               beta=drho0
+
+               ! The final stuff is always required
+               call get_dr(beta,dbeta,n_r_max,rscheme_oc)
+               call get_dr(dbeta,ddbeta,n_r_max,rscheme_oc)
+               call get_dr(dtemp0,d2temp0,n_r_max,rscheme_oc)
+
+               dLtemp0 = dtemp0/temp0
+               ddLtemp0 =-(dtemp0/temp0)**2+d2temp0/temp0
+
+               ogrun(:) = one/GrunNb
+
+            else !-- Adiabatic reference state
+
+               if ( l_isothermal ) then ! Gruneisen is zero in this limit
+                  if ( l_full_sphere ) then
+                     fac = strat/(half*g1*(one+radratio))/(r_cmb-r_icb)
+                  else
+                     fac=strat / ( g0+half*g1*(one+radratio)+g2/radratio ) &
+                     &         / (r_cmb-r_icb)
+                  end if
+                  DissNb     =0.0_cp
+                  GrunNb     =0.0_cp
+                  ogrun(:)   =0.0_cp
+                  temp0(:)   =one
+                  rho0(:)    =exp(-fac*(g0*r(:)+half*g1*r(:)**2/r_cmb-g2*r_cmb**2/&
+                  &               r(:))+fac*r_cmb*(g0+half*g1-g2))
+
+                  beta(:)    =-fac*rgrav(:)
+                  dbeta(:)   =-fac*(g1/r_cmb-two*g2*r_cmb**2*or3(:))
+                  ddbeta(:)  =6.0_cp*fac*g2*r_cmb**2*or4(:)
+                  d2temp0(:) =0.0_cp
+                  dLtemp0(:) =0.0_cp
+                  ddLtemp0(:)=0.0_cp
                else
-                  dtemp0=dtemp0ad
+                  if ( strat == 0.0_cp .and. DissNb /= 0.0_cp ) then
+                     if ( l_full_sphere ) then
+                        strat = polind* log( (half*g1*(one+radratio))*  &
+                        &                    (r_cmb-r_icb)*DissNb+1 )
+                     else
+                        strat = polind* log( (g0+half*g1*(one+radratio)+g2/radratio)*&
+                        &                    (r_cmb-r_icb)*DissNb+1 )
+                     end if
+                  else
+                     if ( l_full_sphere ) then
+                        DissNb=( exp(strat/polind)-one )/(r_cmb-r_icb)/ &
+                        &      ( half*g1*(one+radratio) )
+                     else
+                        DissNb=( exp(strat/polind)-one )/(r_cmb-r_icb)/ &
+                        &      ( g0+half*g1*(one+radratio) +g2/radratio )
+                     end if
+                  end if
+                  GrunNb  =one/polind
+                  ogrun(:)=one/GrunNb
+                  temp0(:)=-DissNb*( g0*r(:)+half*g1*r(:)**2/r_cmb-   &
+                  &         g2*r_cmb**2*or1(:) ) + one + DissNb*r_cmb* &
+                  &         (g0+half*g1-g2)
+                  rho0(:) =temp0**polind
+
+                  !if (l_centrifuge) opressure0(:) = temp0**(-polind-1)
+
+                  !-- Computation of beta= dln rho0 /dr and dbeta=dbeta/dr
+                  beta(:)     =-polind*DissNb*rgrav(:)/temp0(:)
+                  dbeta(:)    =-polind*DissNb/temp0(:)**2 *         &
+                  &            ((g1/r_cmb-two*g2*r_cmb**2*or3(:))*  &
+                  &            temp0(:)  + DissNb*rgrav(:)**2)
+                  ddbeta(:)   =-polind*DissNb/temp0(:)**3 * (   temp0(:)*          &
+                  &            ( 6.0_cp*g2*r_cmb**2*or4(:)*temp0(:)+               &
+                  &              DissNb*rgrav(:)*(g1/r_cmb-two*g2*r_cmb**2*or3(:)) &
+                  &            )+two*DissNb*rgrav(:)*(DissNb*rgrav(:)**2+          &
+                  &             (g1/r_cmb-two*g2*r_cmb**2*or3(:))*temp0(:) ) )
+                  dtemp0(:)   =-DissNb*rgrav(:)
+                  d2temp0(:)  =-DissNb*(g1/r_cmb-two*g2*r_cmb**2*or3(:))
+                  dLtemp0(:)  =dtemp0(:)/temp0(:)
+                  ddLtemp0(:) =-(dtemp0(:)/temp0(:))**2+d2temp0(:)/temp0(:)
                end if
-   
-               call getBackground(dtemp0,one,temp0)
-            end do
-   
-            dentropy0=dtemp0/temp0/epsS+DissNb*alpha0*rgrav/epsS
-            !drho0=-ThExpNb*epsS*alpha0*temp0*dentropy0-DissNb*alpha0*rgrav/GrunNb
-            drho0=-DissNb*alpha0*rgrav/GrunNb
-            call getBackground(drho0,0.0_cp,rho0)
-            rho0=exp(rho0) ! this was ln(rho_0)
-            beta=drho0
-   
-            ! The final stuff is always required
-            call get_dr(beta,dbeta,n_r_max,rscheme_oc)
-            call get_dr(dbeta,ddbeta,n_r_max,rscheme_oc)
-            call get_dr(dtemp0,d2temp0,n_r_max,rscheme_oc)
-            call get_dr(alpha0,dLalpha0,n_r_max,rscheme_oc)
-            dLalpha0=dLalpha0/alpha0 ! d log (alpha) / dr
-            call get_dr(dLalpha0,ddLalpha0,n_r_max,rscheme_oc)
-            dLtemp0 = dtemp0/temp0
-            call get_dr(dLtemp0,ddLtemp0,n_r_max,rscheme_oc)
-   
-            ! N.B. rgrav is not gravity but alpha * grav
-            rgrav = alpha0*rgrav
-   
-            !-- ogrun
-            ogrun(:)=one/GrunNb
-   
-            l_non_adia = .true.
+
+            end if
+
+            !-- Thermal expansion coefficient (1/T for an ideal gas)
+            alpha0(:)   =one/temp0(:)
+            dLalpha0(:) =-dLtemp0(:)
+            ddLalpha0(:)=-ddLtemp0(:)
+
+         end if
       else if (index(interior_model,'MESA_5M_ZAMS') /= 0) then
 
          l_non_adia = .true.
