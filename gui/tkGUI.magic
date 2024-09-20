@@ -81,6 +81,9 @@ class MyWindow(tk.Tk):
         plotBrButton = ttk.Button(self, text="Plot br r=1", command=lambda:self.plotData('br'))
         plotBrButton.grid(row=5, column=0, rowspan=1, columnspan=1, padx=pixalMargin, pady=pixalMargin, sticky=stickyOption)
         
+        plotDenProfButton = ttk.Button(self, text="Plot den&grav", command=lambda:self.plotData('density'))
+        plotDenProfButton.grid(row=5, column=1, rowspan=1, columnspan=1, padx=pixalMargin, pady=pixalMargin, sticky=stickyOption)
+        
         self.figureCanvas = tk.Frame(self)
         self.figureCanvas.grid(row=0, column=3, rowspan=10, columnspan=7, padx=pixalMargin, pady=pixalMargin, sticky=stickyOption)
         self.figureCanvas.grid_propagate(False)
@@ -149,7 +152,16 @@ class MyWindow(tk.Tk):
         elif plot_type=="br":
             S = Surf()
             h = S.surf(field="br",r=1.0,cm="PRGn_r")
-
+        elif plot_type=="density":
+            rad = MagicRadial(field='anel')
+            radius = rad.radius
+            rho0 = rad.rho0
+            grav = rad.grav
+            plt.plot(radius, rho0, label='density')
+            plt.plot(radius, grav, label='gravity')
+            plt.xlabel('Radius')
+            plt.legend()
+            print(dir(rad))
         #plt.savefig(plot_type+'.png')
         fig = plt.gcf()
         fig.set_size_inches(5.5, 4)
